@@ -1,0 +1,183 @@
+/**
+ * Block Builder admin page styles. Own "cb-block-builder-" prefix,
+ * deliberately not reusing either skeleton theme's "-editor-field" or
+ * "-settings-repeater" class names — same reasoning as those themes'
+ * own two repeater implementations staying separately prefixed: this
+ * loads in a different admin context and a shared name would look like
+ * a real connection that isn't there.
+ *
+ * Deliberately wider and plainer-white than a typical wp-admin screen —
+ * WP's own default content width reads cramped next to the block editor's
+ * own full-bleed white canvas, and this page is meant to feel closer to
+ * that than to a classic Settings API page.
+ */
+
+.wrap.cb-block-builder {
+	max-width: none;
+}
+
+.cb-block-builder-card {
+	max-width: 1400px;
+	margin-top: 20px;
+	padding: 32px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 8px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.cb-block-builder-tabs__panel {
+	padding-top: 24px;
+}
+
+.cb-block-builder-npm-status {
+	display: inline-block;
+	padding: 4px 10px;
+	border-radius: 3px;
+	font-size: 13px;
+}
+
+.cb-block-builder-npm-status--ok {
+	background: #edfaef;
+	color: #1a7f37;
+}
+
+.cb-block-builder-npm-status--unknown {
+	background: #fcf0f1;
+	color: #8a4b00;
+}
+
+.cb-block-builder-field-row {
+	margin-bottom: 20px;
+}
+
+.cb-block-builder-field-row label {
+	display: block;
+	font-weight: 600;
+	margin-bottom: 6px;
+}
+
+.cb-block-builder-field-row input[type="text"] {
+	max-width: 480px;
+}
+
+.cb-block-builder-rows {
+	max-width: none;
+}
+
+.cb-block-builder-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 16px;
+	border: 1px solid #e0e0e0;
+	border-radius: 6px;
+	background: #fbfbfc;
+	padding: 16px;
+	margin-bottom: 12px;
+}
+
+.cb-block-builder-row__number {
+	flex: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	margin-top: 2px;
+	border-radius: 50%;
+	background: #f0f0f1;
+	font-size: 12px;
+	font-weight: 600;
+	color: #50575e;
+}
+
+.cb-block-builder-row__main {
+	flex: 1 1 0%;
+	min-width: 0;
+}
+
+.cb-block-builder-row__grid {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 16px;
+}
+
+.cb-block-builder-row__grid label,
+.cb-block-builder-row__conditional label,
+.cb-block-builder-subfields-label {
+	display: block;
+	font-size: 12px;
+	font-weight: 600;
+	color: #1d2327;
+}
+
+.cb-block-builder-row__grid input,
+.cb-block-builder-row__grid select,
+.cb-block-builder-row__conditional input[type="text"],
+.cb-block-builder-row__conditional select {
+	display: block;
+	width: 100%;
+	margin-top: 4px;
+	font-weight: 400;
+}
+
+.cb-block-builder-row__conditional {
+	margin-top: 12px;
+}
+
+.cb-block-builder-row__conditional[hidden] {
+	display: none;
+}
+
+.cb-block-builder-row__actions {
+	flex: none;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.cb-block-builder-subfields-label {
+	margin-bottom: 8px;
+}
+
+.cb-block-builder-subfields {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.cb-block-builder-subfield-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: #fff;
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+	padding: 8px;
+}
+
+.cb-block-builder-subfield-row .cb-block-builder-subfield-label {
+	flex: 1 1 0%;
+}
+
+.cb-block-builder-subfield-row .cb-block-builder-subfield-type {
+	flex: none;
+	width: 140px;
+}
+
+.cb-block-builder-subfield-row .cb-block-builder-subfield-mime {
+	flex: 1 1 0%;
+}
+
+.cb-block-builder-subfield-row .cb-block-builder-subfield-link-target {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex: none;
+	white-space: nowrap;
+}
+
+.cb-block-builder-subfield-row input[hidden] {
+	display: none;
+}
