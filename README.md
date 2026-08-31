@@ -50,10 +50,15 @@ setup (umask tweaks, ACLs) required per project or per checkout.
     rule — the plugin sniffs this to find the theme's own editor-chrome CSS
     class prefix, since that prefix isn't reliably derivable from the theme's
     Text Domain alone (see `inc/environment.php`)
+  - `blocks/_shared/EditorBlockShell.js`, which generated blocks import for
+    the shared show/hide editor chrome on the block title row
   - `blocks/_shared/RepeaterField.js`, if you intend to use the **Repeater**
     field type — this plugin only ever emits a reference to it
     (`import RepeaterField from '../../_shared/RepeaterField'`), it does not
-    write that component itself
+    write that component itself. A repeater's **Radio** sub-field type
+    additionally needs that component's own `radio` branch (added
+    upstream in `lc-js-skeleton2026`/`cb-js-skeleton2026`) — without it,
+    a radio sub-field silently falls back to a plain text input
   - `blocks/_shared/PostTypePicker.js`, if you intend to use the **Post
     Type** field type — same "emits a reference, doesn't write it" deal
     (`import PostTypePicker from '../../_shared/PostTypePicker'`)
@@ -86,30 +91,51 @@ warning rather than hiding the page outright.
 
 ## Field types
 
-| Type | Notes |
-|---|---|
-| Text / URL / Number | Single-line input |
-| Textarea | Choose paragraph (wpautop), list (`<ul><li>`), or line-break rendering |
-| Rich Text | `RichText` control, `wp_kses_post` on render |
-| Image | Single image, `MediaUpload` |
-| Gallery | Multiple images — the `useSelect`/`core-data` + `MediaUpload` `gallery` picker pattern, array of attachment IDs |
-| Link | Text + URL, optional "open in new tab" toggle |
-| Select | Comma-separated options |
-| Checkbox | Boolean toggle |
-| Repeater | Repeating rows of sub-fields (text / textarea / image / file / link — file fields take a comma-separated MIME-type allow-list, link fields get their own "open in new tab" toggle). Rows can lay out as a row (default) or a column. |
-| Post Type | Single post picker (search-as-you-type `ComboboxControl`, backed by `@wordpress/core-data`) — the block-editor equivalent of ACF's single `post_object` field. Pick which registered post type it searches (e.g. `product`) from a dropdown of post types actually registered on this site. Stores one post ID (`{name}Id`, `type: number`); render.php gets a generic `get_post()` + linked-title skeleton to hand-finish. |
+| Type                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Text / URL / Number | Single-line input                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Textarea            | Choose paragraph (wpautop), list (`<ul><li>`), or line-break rendering                                                                                                                                                                                                                                                                                                                                                      |
+| Rich Text           | `RichText` control, `wp_kses_post` on render                                                                                                                                                                                                                                                                                                                                                                                |
+| Image               | Single image, `MediaUpload`                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Gallery             | Multiple images — the `useSelect`/`core-data` + `MediaUpload` `gallery` picker pattern, array of attachment IDs                                                                                                                                                                                                                                                                                                             |
+| Link                | Text + URL, optional "open in new tab" toggle                                                                                                                                                                                                                                                                                                                                                                               |
+| Select              | Comma-separated options. Wrap one in `[brackets]` to make it the default; otherwise the first option is used.                                                                                                                                                                                                                                                                                                               |
+| Radio               | Same comma-separated/`[bracket]`-default options as Select, rendered as `RadioControl`. Also available as a repeater sub-field type — needs `blocks/_shared/RepeaterField.js`'s matching `radio` branch.                                                                                                                                                                                                                    |
+| Checkbox            | Boolean toggle                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Repeater            | Repeating rows of sub-fields (text / number / textarea / image / file / link / radio — file fields take a comma-separated MIME-type allow-list, link fields get their own "open in new tab" toggle, radio fields get the same options/default syntax as the top-level Select/Radio types). Rows can lay out as a row (default) or a column.                                                                                 |
+| Post Type           | Single post picker (search-as-you-type `ComboboxControl`, backed by `@wordpress/core-data`) — the block-editor equivalent of ACF's single `post_object` field. Pick which registered post type it searches (e.g. `product`) from a dropdown of post types actually registered on this site. Stores one post ID (`{name}Id`, `type: number`); render.php gets a generic `get_post()` + linked-title skeleton to hand-finish. |
 
-Every generated field, including repeater/gallery, mirrors the *structure*
+Every generated field, including repeater/gallery, mirrors the _structure_
 of how the reference theme's own hand-written blocks do it — this tool
 produces a working skeleton, not necessarily finished design; expect to
 open `render.php`/`src/edit.js` afterward and adjust markup/classes to the
 project's actual design.
 
+## Editing an existing block's fields
+
+Blocks created by this plugin get a `.block-builder.json` sidecar file
+alongside `block.json` — the designer's own field schema (types, sub-fields,
+etc.) that `block.json`'s `attributes` can't fully represent on its own.
+Any block with that sidecar shows an **Edit fields** link on the **Blocks**
+tab, which re-opens it in the **Design New** panel with every field
+pre-filled.
+
+Saving an edit regenerates `block.json`, `src/index.js`, `src/edit.js`,
+and the sidecar from the edited field list — so adding, removing,
+resizing, or reordering fields actually takes effect in the editor. The
+trade-off: **any hand edits previously made to `src/edit.js` are
+overwritten**. `render.php` is never touched by an edit — the on-screen
+notice reminds you to check it still matches whatever field changes you
+just made. Blocks with no sidecar (hand-written, or created before this
+existed) have no **Edit fields** link — they stay exactly as read-only as
+before.
+
 ## What this plugin does not do
 
 - It does not run `npm run blocks:build` for you — it only writes files.
-- It does not delete or edit existing blocks — the **Blocks** tab is
-  read-only.
+- It does not preserve hand edits to `src/edit.js` across a field edit, and
+  it never touches `render.php` at all after initial creation — see
+  "Editing an existing block's fields" above.
 - It does not support the `relationship` field type (multiple posts,
   e.g. blocks that pull a whole grid from a custom post type via
   `WP_Query`) — that still needs to be built by hand, same as with the CLI
@@ -122,7 +148,7 @@ project's actual design.
 cb-block-builder.php     Plugin header, environment gate, bootstraps the rest
 inc/
   environment.php        Local-environment + npm detection, active-theme shape/prefix sniffing
-  generator.php           Builds block.json / src/index.js / src/edit.js / render.php and writes them
+  generator.php           Builds block.json / src/index.js / src/edit.js / render.php (+ .block-builder.json sidecar) and writes/updates them
   admin-page.php           Registers the admin menu, renders the tabbed page
   handlers.php              admin-post.php handler: validates, calls the generator, redirects with a notice
 js/

@@ -54,6 +54,7 @@ function cb_block_builder_handle_generate() {
 	$color_support = ! empty( $_POST['color_support'] );
 	$fields_json   = isset( $_POST['fields_json'] ) ? wp_unslash( $_POST['fields_json'] ) : '[]';
 	$fields        = json_decode( $fields_json, true );
+	$editing_slug  = isset( $_POST['editing_slug'] ) ? sanitize_key( wp_unslash( $_POST['editing_slug'] ) ) : '';
 
 	if ( ! is_array( $fields ) ) {
 		cb_block_builder_redirect_with_notice( 'error', __( 'Could not read the submitted field data.', 'cb-block-builder' ) );
@@ -82,14 +83,39 @@ function cb_block_builder_handle_generate() {
 					continue;
 				}
 				$sanitized_field['sub_fields'][] = array(
-					'label'      => isset( $sub_field['label'] ) ? (string) $sub_field['label'] : '',
-					'type'       => isset( $sub_field['type'] ) ? (string) $sub_field['type'] : '',
-					'mime_types' => isset( $sub_field['mime_types'] ) ? (string) $sub_field['mime_types'] : '',
+					'label'       => isset( $sub_field['label'] ) ? (string) $sub_field['label'] : '',
+					'type'        => isset( $sub_field['type'] ) ? (string) $sub_field['type'] : '',
+					'mime_types'  => isset( $sub_field['mime_types'] ) ? (string) $sub_field['mime_types'] : '',
+					'link_target' => ! empty( $sub_field['link_target'] ),
+					'options'     => isset( $sub_field['options'] ) ? (string) $sub_field['options'] : '',
 				);
 			}
 		}
 
 		$sanitized_fields[] = $sanitized_field;
+	}
+
+	if ( '' !== $editing_slug ) {
+		$result = cb_block_builder_regenerate_block(
+			$editing_slug,
+			array(
+				'color_support' => $color_support,
+				'fields'        => $sanitized_fields,
+			)
+		);
+
+		if ( is_wp_error( $result ) ) {
+			cb_block_builder_redirect_with_notice( 'error', $result->get_error_message() );
+		}
+
+		cb_block_builder_redirect_with_notice(
+			'success',
+			sprintf(
+				/* translators: %s: block slug. */
+				__( 'Block "%s" regenerated with its updated fields — block.json and src/edit.js were rewritten (any hand edits to src/edit.js were overwritten). render.php was NOT touched — check it still matches. Run npm run blocks:build (or blocks:start) in the theme directory to pick up the change.', 'cb-block-builder' ),
+				$result['slug']
+			)
+		);
 	}
 
 	$result = cb_block_builder_generate_block(

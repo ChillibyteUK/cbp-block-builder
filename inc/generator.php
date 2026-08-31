@@ -26,7 +26,7 @@ defined( 'ABSPATH' ) || exit;
  * @var string[]
  */
 function cb_block_builder_supported_field_types() {
-	return array( 'text', 'textarea', 'richtext', 'image', 'gallery', 'url', 'link', 'number', 'select', 'checkbox', 'repeater', 'post_type' );
+	return array( 'text', 'textarea', 'richtext', 'image', 'gallery', 'url', 'link', 'number', 'select', 'radio', 'checkbox', 'repeater', 'post_type' );
 }
 
 /**
@@ -36,7 +36,58 @@ function cb_block_builder_supported_field_types() {
  * @var string[]
  */
 function cb_block_builder_supported_subfield_types() {
-	return array( 'text', 'textarea', 'image', 'file', 'link' );
+	return array( 'text', 'number', 'textarea', 'image', 'file', 'link', 'radio' );
+}
+
+/**
+ * Parse a comma-separated `select`/`radio` options string into an ordered
+ * options list plus a default value. Every option becomes a
+ * `{ label, value }` pair (the same string for both), in the order given.
+ * Wrapping exactly one option in [brackets] marks it as the default/
+ * pre-selected value, with the brackets stripped from both label and
+ * value; wrapping none defaults to the first option instead.
+ *
+ * @param string $raw_options Comma-separated options, e.g. 'Yes,[No]'.
+ * @return array{options: array<int, array{label: string, value: string}>, default: string}
+ */
+function cb_block_builder_parse_field_options( $raw_options ) {
+	$options = array();
+	$default = '';
+
+	foreach ( explode( ',', (string) $raw_options ) as $option ) {
+		$option = trim( $option );
+		if ( '' === $option ) {
+			continue;
+		}
+
+		$is_default = false;
+		if ( preg_match( '/^\[(.+)\]$/', $option, $matches ) ) {
+			$option     = trim( $matches[1] );
+			$is_default = true;
+		}
+
+		if ( '' === $option ) {
+			continue;
+		}
+
+		$options[] = array(
+			'label' => $option,
+			'value' => $option,
+		);
+
+		if ( $is_default ) {
+			$default = $option;
+		}
+	}
+
+	if ( '' === $default && ! empty( $options ) ) {
+		$default = $options[0]['value'];
+	}
+
+	return array(
+		'options' => $options,
+		'default' => $default,
+	);
 }
 
 /**
@@ -130,14 +181,38 @@ function cb_block_builder_validate_config( $config, $blocks_dir ) {
 		);
 	}
 
-	if ( empty( $config['fields'] ) || ! is_array( $config['fields'] ) ) {
+	return cb_block_builder_validate_fields( $config['fields'] ?? array() );
+}
+
+/**
+ * Validate a block config for the "edit an existing block's attributes"
+ * path — same per-field rules as a new block, minus the title/slug checks
+ * (the slug can't change once a block exists; see
+ * cb_block_builder_update_block_attributes()).
+ *
+ * @param array $config Raw config: color_support, fields.
+ * @return true|WP_Error
+ */
+function cb_block_builder_validate_edit_config( $config ) {
+	return cb_block_builder_validate_fields( $config['fields'] ?? array() );
+}
+
+/**
+ * Per-field validation rules shared by both the "create" and "edit
+ * attributes" paths.
+ *
+ * @param array $fields Raw field rows.
+ * @return true|WP_Error
+ */
+function cb_block_builder_validate_fields( $fields ) {
+	if ( empty( $fields ) || ! is_array( $fields ) ) {
 		return true; // A block with no fields is valid, same as add_block.sh allows.
 	}
 
 	$allowed_types  = cb_block_builder_supported_field_types();
 	$allowed_widths = array( 100, 50, 33, 25 );
 
-	foreach ( $config['fields'] as $index => $field ) {
+	foreach ( $fields as $index => $field ) {
 		if ( empty( $field['label'] ) || ! is_string( $field['label'] ) ) {
 			// translators: %d: 1-based field row number.
 			return new WP_Error( 'cb_block_builder_field_label', sprintf( __( 'Field #%d needs a label.', 'cb-block-builder' ), $index + 1 ) );
@@ -224,6 +299,25 @@ function cb_block_builder_validate_subfields( $field, $index ) {
 }
 
 /**
+ * Sanitize a field's help text: the same whitespace/encoding cleanup as
+ * sanitize_text_field(), but deliberately skips its HTML-tag stripping.
+ * Help text is only ever used as a JS string literal (embedded via
+ * cb_block_builder_js_str(), which handles JS-string escaping) or set as a
+ * form field's `.value` property in the admin UI (never echoed as raw
+ * HTML) — so it's safe, and sometimes necessary, for it to contain literal
+ * "<strong>"/"<em>"-style instructional text (e.g. "wrap a word in
+ * <strong> to bold it") without that being silently stripped.
+ *
+ * @param string $value Raw help text.
+ * @return string
+ */
+function cb_block_builder_sanitize_help_text( $value ) {
+	$value = wp_check_invalid_utf8( (string) $value );
+	$value = trim( $value );
+	return preg_replace( '/[\r\n\t ]+/', ' ', $value );
+}
+
+/**
  * Normalise a raw submitted field row into the shape the rest of this file
  * expects: adds the derived camelCase JS name and snake_case PHP name.
  *
@@ -236,7 +330,7 @@ function cb_block_builder_normalise_field( $field ) {
 	$normalised = array(
 		'label'          => sanitize_text_field( $field['label'] ),
 		'type'           => sanitize_key( $field['type'] ),
-		'help'           => isset( $field['help'] ) ? sanitize_text_field( $field['help'] ) : '',
+		'help'           => isset( $field['help'] ) ? cb_block_builder_sanitize_help_text( $field['help'] ) : '',
 		'width'          => (int) ( $field['width'] ?? 100 ),
 		'options'        => isset( $field['options'] ) ? sanitize_text_field( $field['options'] ) : '',
 		'textarea_style' => isset( $field['textarea_style'] ) ? sanitize_key( $field['textarea_style'] ) : 'paragraph',
@@ -260,7 +354,7 @@ function cb_block_builder_normalise_field( $field ) {
 /**
  * Normalise a raw submitted repeater sub-field row.
  *
- * @param array $sub_field Raw sub-field row: label, type, mime_types, link_target.
+ * @param array $sub_field Raw sub-field row: label, type, mime_types, link_target, options.
  * @return array
  */
 function cb_block_builder_normalise_subfield( $sub_field ) {
@@ -271,6 +365,7 @@ function cb_block_builder_normalise_subfield( $sub_field ) {
 		'type'        => sanitize_key( $sub_field['type'] ),
 		'mime_types'  => isset( $sub_field['mime_types'] ) ? sanitize_text_field( $sub_field['mime_types'] ) : '',
 		'link_target' => ! empty( $sub_field['link_target'] ),
+		'options'     => isset( $sub_field['options'] ) ? sanitize_text_field( $sub_field['options'] ) : '',
 		'name'        => cb_block_builder_camel_from_snake( $snake ),
 		'snake'       => $snake,
 	);
@@ -294,10 +389,18 @@ function cb_block_builder_build_attributes_array( $fields ) {
 			case 'textarea':
 			case 'richtext':
 			case 'url':
-			case 'select':
 				$attributes[ $name ] = array(
 					'type'    => 'string',
 					'default' => '',
+				);
+				break;
+
+			case 'select':
+			case 'radio':
+				$parsed               = cb_block_builder_parse_field_options( $field['options'] );
+				$attributes[ $name ]  = array(
+					'type'    => 'string',
+					'default' => $parsed['default'],
 				);
 				break;
 
@@ -388,16 +491,13 @@ function cb_block_builder_json_encode_tabs( $data ) {
 }
 
 /**
- * Build block.json's full contents.
+ * Build block.json's `supports` object — shared by initial generation and
+ * by cb_block_builder_update_block_attributes()'s attributes-only edit path.
  *
- * @param string $title         Block title.
- * @param string $slug          Block slug.
- * @param string $text_domain   Active theme's Text Domain.
- * @param array  $fields        Normalised fields.
- * @param bool   $color_support Whether to add background/text colour support.
- * @return string
+ * @param bool $color_support Whether to add background/text colour support.
+ * @return array
  */
-function cb_block_builder_build_block_json( $title, $slug, $text_domain, $fields, $color_support ) {
+function cb_block_builder_build_supports( $color_support ) {
 	$supports = array(
 		'anchor'    => true,
 		'className' => true,
@@ -411,6 +511,20 @@ function cb_block_builder_build_block_json( $title, $slug, $text_domain, $fields
 		);
 	}
 
+	return $supports;
+}
+
+/**
+ * Build block.json's full contents.
+ *
+ * @param string $title         Block title.
+ * @param string $slug          Block slug.
+ * @param string $text_domain   Active theme's Text Domain.
+ * @param array  $fields        Normalised fields.
+ * @param bool   $color_support Whether to add background/text colour support.
+ * @return string
+ */
+function cb_block_builder_build_block_json( $title, $slug, $text_domain, $fields, $color_support ) {
 	$block_json = array(
 		'$schema'      => 'https://schemas.wp.org/trunk/block.json',
 		'apiVersion'   => 3,
@@ -419,12 +533,52 @@ function cb_block_builder_build_block_json( $title, $slug, $text_domain, $fields
 		'category'     => $text_domain,
 		'icon'         => 'cover-image',
 		'attributes'   => (object) cb_block_builder_build_attributes_array( $fields ),
-		'supports'     => $supports,
+		'supports'     => cb_block_builder_build_supports( $color_support ),
 		'editorScript' => 'file:./build/index.js',
 		'render'       => 'file:./render.php',
 	);
 
 	return cb_block_builder_json_encode_tabs( $block_json ) . "\n";
+}
+
+/**
+ * Build the `.block-builder.json` sidecar contents — the designer's own
+ * field schema, stored alongside the generated files so a block can later
+ * be re-opened for editing (block.json's `attributes` alone can't be
+ * reversed back into field types/sub-fields; see README's "field group
+ * editor" notes).
+ *
+ * @param string $title         Block title.
+ * @param bool   $color_support Whether colour support is enabled.
+ * @param array  $fields        Normalised fields.
+ * @return string
+ */
+function cb_block_builder_build_sidecar_json( $title, $color_support, $fields ) {
+	$data = array(
+		'title'         => $title,
+		'color_support' => (bool) $color_support,
+		'fields'        => $fields,
+	);
+
+	return cb_block_builder_json_encode_tabs( $data ) . "\n";
+}
+
+/**
+ * Read a block's `.block-builder.json` sidecar, if it has one.
+ *
+ * @param string $block_dir Block directory (blocks/{slug}).
+ * @return array|null
+ */
+function cb_block_builder_read_sidecar_config( $block_dir ) {
+	$path = trailingslashit( $block_dir ) . '.block-builder.json';
+
+	if ( ! file_exists( $path ) ) {
+		return null;
+	}
+
+	$data = json_decode( (string) file_get_contents( $path ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local theme file, not remote/user input.
+
+	return is_array( $data ) ? $data : null;
 }
 
 /**
@@ -479,16 +633,22 @@ function cb_block_builder_build_field_jsx( $field, $editor_prefix, $text_domain 
 			return "\t\t\t<ToggleControl\n\t\t\t\tlabel={ __( '{$label}', '{$domain}' ) }\n\t\t\t\tchecked={ {$name} }\n\t\t\t\tonChange={ ( value ) => setAttributes( { {$name}: value } ) }{$help_attr}\n\t\t\t/>\n";
 
 		case 'select':
+			$parsed     = cb_block_builder_parse_field_options( $field['options'] );
 			$options_js = '';
-			foreach ( explode( ',', $field['options'] ) as $option ) {
-				$option = trim( $option );
-				if ( '' === $option ) {
-					continue;
-				}
-				$option_js   = cb_block_builder_js_str( $option );
+			foreach ( $parsed['options'] as $option ) {
+				$option_js   = cb_block_builder_js_str( $option['value'] );
 				$options_js .= "\t\t\t\t\t{ label: '{$option_js}', value: '{$option_js}' },\n";
 			}
-			return "\t\t\t<SelectControl\n\t\t\t\tlabel={ __( '{$label}', '{$domain}' ) }\n\t\t\t\tvalue={ {$name} }\n\t\t\t\toptions={ [\n\t\t\t\t\t{ label: '', value: '' },\n{$options_js}\t\t\t\t] }\n\t\t\t\tonChange={ ( value ) => setAttributes( { {$name}: value } ) }{$help_attr}\n\t\t\t/>\n";
+			return "\t\t\t<SelectControl\n\t\t\t\tlabel={ __( '{$label}', '{$domain}' ) }\n\t\t\t\tvalue={ {$name} }\n\t\t\t\toptions={ [\n{$options_js}\t\t\t\t] }\n\t\t\t\tonChange={ ( value ) => setAttributes( { {$name}: value } ) }{$help_attr}\n\t\t\t/>\n";
+
+		case 'radio':
+			$parsed           = cb_block_builder_parse_field_options( $field['options'] );
+			$radio_options_js = '';
+			foreach ( $parsed['options'] as $option ) {
+				$option_js         = cb_block_builder_js_str( $option['value'] );
+				$radio_options_js .= "\t\t\t\t\t{ label: '{$option_js}', value: '{$option_js}' },\n";
+			}
+			return "\t\t\t<RadioControl\n\t\t\t\tlabel={ __( '{$label}', '{$domain}' ) }\n\t\t\t\tselected={ {$name} }\n\t\t\t\toptions={ [\n{$radio_options_js}\t\t\t\t] }\n\t\t\t\tonChange={ ( value ) => setAttributes( { {$name}: value } ) }{$help_attr}\n\t\t\t/>\n";
 
 		case 'image':
 			return "\t\t\t<div className=\"{$editor_prefix}-editor-field\">\n\t\t\t\t<label className=\"{$editor_prefix}-editor-field__label\">{ __( '{$label}', '{$domain}' ) }</label>\n\t\t\t\t<MediaUploadCheck>\n\t\t\t\t\t<MediaUpload\n\t\t\t\t\t\tonSelect={ ( media ) =>\n\t\t\t\t\t\t\tsetAttributes( {\n\t\t\t\t\t\t\t\t{$name}Id: media.id,\n\t\t\t\t\t\t\t\t{$name}Url: media.url,\n\t\t\t\t\t\t\t\t{$name}Alt: media.alt || '',\n\t\t\t\t\t\t\t} )\n\t\t\t\t\t\t}\n\t\t\t\t\t\tallowedTypes={ [ 'image' ] }\n\t\t\t\t\t\tvalue={ {$name}Id }\n\t\t\t\t\t\trender={ ( { open } ) => (\n\t\t\t\t\t\t\t<div className=\"{$editor_prefix}-editor-field__control\">\n\t\t\t\t\t\t\t\t{ {$name}Url && (\n\t\t\t\t\t\t\t\t\t<img\n\t\t\t\t\t\t\t\t\t\tsrc={ {$name}Url }\n\t\t\t\t\t\t\t\t\t\talt={ {$name}Alt }\n\t\t\t\t\t\t\t\t\t\tstyle={ { maxWidth: '200px', display: 'block', marginBottom: '8px' } }\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t) }\n\t\t\t\t\t\t\t\t<Button variant=\"secondary\" onClick={ open }>\n\t\t\t\t\t\t\t\t\t{ {$name}Url ? __( 'Replace {$label}', '{$domain}' ) : __( 'Select {$label}', '{$domain}' ) }\n\t\t\t\t\t\t\t\t</Button>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t) }\n\t\t\t\t\t/>\n\t\t\t\t</MediaUploadCheck>{$help_para}\n\t\t\t</div>\n";
@@ -539,6 +699,7 @@ function cb_block_builder_build_repeater_consts( $field, $text_domain ) {
 		$sub_type  = $sub_field['type'];
 
 		$extra_props_js = '';
+		$radio_default  = '';
 		if ( 'file' === $sub_type && '' !== $sub_field['mime_types'] ) {
 			$mime_items = array();
 			foreach ( explode( ',', $sub_field['mime_types'] ) as $mime ) {
@@ -553,6 +714,17 @@ function cb_block_builder_build_repeater_consts( $field, $text_domain ) {
 			}
 		} elseif ( 'link' === $sub_type && $sub_field['link_target'] ) {
 			$extra_props_js = ', linkTarget: true';
+		} elseif ( 'radio' === $sub_type && '' !== $sub_field['options'] ) {
+			$parsed        = cb_block_builder_parse_field_options( $sub_field['options'] );
+			$radio_default = $parsed['default'];
+			$option_items  = array();
+			foreach ( $parsed['options'] as $option ) {
+				$option_js      = cb_block_builder_js_str( $option['value'] );
+				$option_items[] = "{ label: '{$option_js}', value: '{$option_js}' }";
+			}
+			if ( $option_items ) {
+				$extra_props_js = ', options: [ ' . implode( ', ', $option_items ) . ' ]';
+			}
 		}
 
 		$field_lines .= "\t{ name: '{$sub_name}', label: __( '{$sub_label}', '{$domain}' ), type: '{$sub_type}'{$extra_props_js} },\n";
@@ -563,8 +735,10 @@ function cb_block_builder_build_repeater_consts( $field, $text_domain ) {
 			if ( $sub_field['link_target'] ) {
 				$empty_row_pairs[] = "{$sub_name}Target: false";
 			}
+		} elseif ( 'radio' === $sub_type && '' !== $radio_default ) {
+			$empty_row_pairs[] = "{$sub_name}: '" . cb_block_builder_js_str( $radio_default ) . "'";
 		} else {
-			$default_value     = in_array( $sub_type, array( 'image', 'file' ), true ) ? '0' : "''";
+			$default_value     = in_array( $sub_type, array( 'image', 'file', 'number' ), true ) ? '0' : "''";
 			$empty_row_pairs[] = "{$sub_name}: {$default_value}";
 		}
 	}
@@ -607,6 +781,7 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 		'textcontrol'     => false,
 		'textareacontrol' => false,
 		'selectcontrol'   => false,
+		'radiocontrol'    => false,
 		'togglecontrol'   => false,
 		'button'          => false,
 		'repeaterfield'   => false,
@@ -639,6 +814,9 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 				break;
 			case 'select':
 				$need['selectcontrol'] = true;
+				break;
+			case 'radio':
+				$need['radiocontrol'] = true;
 				break;
 			case 'checkbox':
 				$need['togglecontrol'] = true;
@@ -676,6 +854,9 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 	if ( $need['selectcontrol'] ) {
 		$components_imports[] = 'SelectControl';
 	}
+	if ( $need['radiocontrol'] ) {
+		$components_imports[] = 'RadioControl';
+	}
 	if ( $need['togglecontrol'] ) {
 		$components_imports[] = 'ToggleControl';
 	}
@@ -694,6 +875,7 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 	if ( $need['posttypepicker'] ) {
 		$extra_import_lines[] = "import PostTypePicker from '../../_shared/PostTypePicker';";
 	}
+	$extra_import_lines[] = "import EditorBlockShell from '../../_shared/EditorBlockShell';";
 
 	$module_consts = array();
 	$body_hooks    = array();
@@ -780,7 +962,7 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 		$lines[] = '';
 	}
 
-	$lines[] = 'export default function Edit( { attributes, setAttributes } ) {';
+	$lines[] = 'export default function Edit( { attributes, setAttributes, clientId } ) {';
 	if ( ! empty( $attr_destructure ) ) {
 		$lines[] = "\tconst { " . implode( ', ', $attr_destructure ) . ' } = attributes;';
 	}
@@ -791,11 +973,10 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 	}
 	$lines[] = '';
 	$lines[] = "\treturn (";
-	$lines[] = "\t\t<div { ...blockProps }>";
 	$title_js = cb_block_builder_js_str( $title );
-	$lines[]  = "\t\t\t<p className=\"{$editor_prefix}-editor-block__title\">{$title_js}</p>";
+	$lines[]  = "\t\t<EditorBlockShell blockProps={ blockProps } clientId={ clientId } classPrefix=\"{$editor_prefix}\" textDomain=\"{$text_domain}\" title=\"{$title_js}\">";
 	$lines[]  = rtrim( $controls, "\n" );
-	$lines[]  = "\t\t</div>";
+	$lines[]  = "\t\t</EditorBlockShell>";
 	$lines[]  = "\t);";
 	$lines[]  = '}';
 
@@ -816,6 +997,7 @@ function cb_block_builder_build_field_render( $field ) {
 		case 'text':
 		case 'url':
 		case 'select':
+		case 'radio':
 			return array(
 				'extract' => "\${$snake} = \$attributes['{$name}'] ?? '';\n",
 				'markup'  => "\t<?php if ( \${$snake} ) { ?>\n\t\t<p><?php echo esc_html( \${$snake} ); ?></p>\n\t<?php } ?>\n",
@@ -1080,11 +1262,14 @@ function cb_block_builder_generate_block( $config ) {
 	$edit_js    = cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, $title );
 	$render_php = cb_block_builder_build_render_php( $title, $fields, $text_domain );
 
+	$sidecar_json = cb_block_builder_build_sidecar_json( $title, $color_support, $fields );
+
 	$writes = array(
-		trailingslashit( $block_dir ) . 'block.json'  => $block_json,
-		trailingslashit( $src_dir ) . 'index.js'       => $index_js,
-		trailingslashit( $src_dir ) . 'edit.js'        => $edit_js,
-		trailingslashit( $block_dir ) . 'render.php'   => $render_php,
+		trailingslashit( $block_dir ) . 'block.json'            => $block_json,
+		trailingslashit( $src_dir ) . 'index.js'                 => $index_js,
+		trailingslashit( $src_dir ) . 'edit.js'                   => $edit_js,
+		trailingslashit( $block_dir ) . 'render.php'             => $render_php,
+		trailingslashit( $block_dir ) . '.block-builder.json'    => $sidecar_json,
 	);
 
 	foreach ( $writes as $path => $contents ) {
@@ -1100,5 +1285,133 @@ function cb_block_builder_generate_block( $config ) {
 	return array(
 		'slug' => $slug,
 		'dir'  => $block_dir,
+	);
+}
+
+/**
+ * Regenerate an existing block's `src/edit.js`, patch its `block.json`
+ * `attributes`/`supports` in place, and rewrite its `.block-builder.json`
+ * sidecar from an edited field designer config — this is what makes
+ * adding, removing, resizing, or reordering fields actually take effect in
+ * the block editor.
+ *
+ * `block.json` is deliberately *patched*, not rebuilt from scratch: only
+ * `attributes` and `supports` are ever touched, every other key (name,
+ * category, icon, editorScript, render, and anything the plugin doesn't
+ * know about at all — viewScript, style, keywords, description, etc.) is
+ * carried over from the file exactly as it already was. An earlier version
+ * of this function rebuilt the whole object via
+ * cb_block_builder_build_attributes_array()'s companion
+ * cb_block_builder_build_block_json(), which silently dropped any key
+ * outside its fixed schema — that's what caused a real hand-written
+ * block's `viewScript`/`style` to vanish from block.json after an edit;
+ * never repeat that mistake here.
+ *
+ * `render.php` is left alone entirely: none of what the field designer
+ * edits (field presence aside) affects its output — width/order are
+ * edit.js-only flex-layout concerns — and it's the file most likely to
+ * carry hand-written markup/classes worth keeping. Overwriting `src/edit.js`
+ * does still cost you any hand edits made there since the block was first
+ * generated — no way around that if the regenerated JSX is to reflect the
+ * new field list at all. Adding a brand new field still needs its render
+ * markup added to `render.php` by hand, same as at initial creation — see
+ * README "Editing an existing block's fields".
+ *
+ * @param string $slug   Existing block's slug (its blocks/{slug} directory).
+ * @param array  $config Raw config: color_support, fields.
+ * @return array{slug: string, dir: string, title: string}|WP_Error
+ */
+function cb_block_builder_regenerate_block( $slug, $config ) {
+	if ( ! cb_block_builder_is_local_environment() ) {
+		return new WP_Error( 'cb_block_builder_not_local', __( 'This only runs on a local development environment.', 'cb-block-builder' ) );
+	}
+
+	$theme_context   = cb_block_builder_get_theme_context();
+	$block_dir       = trailingslashit( $theme_context['blocks_dir'] ) . $slug;
+	$src_dir         = trailingslashit( $block_dir ) . 'src';
+	$block_json_path = trailingslashit( $block_dir ) . 'block.json';
+
+	if ( ! file_exists( $block_json_path ) ) {
+		return new WP_Error( 'cb_block_builder_edit_missing', __( 'That block no longer exists.', 'cb-block-builder' ) );
+	}
+
+	if ( null === cb_block_builder_read_sidecar_config( $block_dir ) ) {
+		return new WP_Error( 'cb_block_builder_edit_no_sidecar', __( 'This block wasn\'t created by Block Builder (or predates edit support), so it can\'t be edited here.', 'cb-block-builder' ) );
+	}
+
+	$validation = cb_block_builder_validate_edit_config( $config );
+	if ( is_wp_error( $validation ) ) {
+		return $validation;
+	}
+
+	if ( ! $theme_context['blocks_dir_writable'] ) {
+		return new WP_Error( 'cb_block_builder_not_writable', __( 'The active theme\'s blocks/ directory is not writable.', 'cb-block-builder' ) );
+	}
+
+	$fields = array();
+	foreach ( (array) ( $config['fields'] ?? array() ) as $raw_field ) {
+		$fields[] = cb_block_builder_normalise_field( $raw_field );
+	}
+
+	$color_support = ! empty( $config['color_support'] );
+
+	// Title never comes from the edit form (it's locked read-only in the UI
+	// since renaming would move the block to a different slug) — read it
+	// back from the block's own existing block.json instead of trusting
+	// whatever the client submitted.
+	$block_json_data = json_decode( (string) file_get_contents( $block_json_path ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local theme file, not remote/user input.
+
+	if ( ! is_array( $block_json_data ) || empty( $block_json_data['title'] ) ) {
+		return new WP_Error( 'cb_block_builder_edit_bad_json', __( 'Could not read this block\'s existing block.json.', 'cb-block-builder' ) );
+	}
+
+	$title         = (string) $block_json_data['title'];
+	$text_domain   = $theme_context['text_domain'];
+	$editor_prefix = $theme_context['editor_prefix'];
+
+	global $wp_filesystem;
+	if ( ! function_exists( 'WP_Filesystem' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+	}
+	WP_Filesystem();
+
+	if ( ! $wp_filesystem ) {
+		return new WP_Error( 'cb_block_builder_no_filesystem', __( 'Could not initialise the filesystem.', 'cb-block-builder' ) );
+	}
+
+	if ( ! file_exists( $src_dir ) && ! $wp_filesystem->mkdir( $src_dir, 0775 ) ) {
+		return new WP_Error( 'cb_block_builder_mkdir_failed', __( 'Could not create the block\'s src/ directory.', 'cb-block-builder' ) );
+	}
+
+	// Patch only the two keys the field designer actually owns — every
+	// other key already in block.json (including ones the plugin itself
+	// would normally set on a fresh block, like editorScript/render, and
+	// ones it never touches at all, like viewScript/style) is carried over
+	// untouched. See this function's docblock for why a wholesale rebuild
+	// here is wrong.
+	$block_json_data['attributes'] = (object) cb_block_builder_build_attributes_array( $fields );
+	$block_json_data['supports']   = cb_block_builder_build_supports( $color_support );
+
+	$writes = array(
+		$block_json_path                                      => cb_block_builder_json_encode_tabs( $block_json_data ) . "\n",
+		trailingslashit( $src_dir ) . 'index.js'              => cb_block_builder_build_index_js(),
+		trailingslashit( $src_dir ) . 'edit.js'                => cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, $title ),
+		trailingslashit( $block_dir ) . '.block-builder.json' => cb_block_builder_build_sidecar_json( $title, $color_support, $fields ),
+	);
+
+	foreach ( $writes as $path => $contents ) {
+		if ( ! $wp_filesystem->put_contents( $path, $contents, 0664 ) ) {
+			return new WP_Error(
+				'cb_block_builder_write_failed',
+				// translators: %s: file path that failed to write.
+				sprintf( __( 'Could not write %s.', 'cb-block-builder' ), $path )
+			);
+		}
+	}
+
+	return array(
+		'slug'  => $slug,
+		'dir'   => $block_dir,
+		'title' => $title,
 	);
 }

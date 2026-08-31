@@ -45,15 +45,55 @@ function cb_block_builder_enqueue_assets( $hook_suffix ) {
 	wp_enqueue_script( 'cb-block-builder-tabs', CB_BLOCK_BUILDER_URL . 'js/tabs.js', array(), CB_BLOCK_BUILDER_VERSION, true );
 
 	wp_enqueue_script( 'cb-block-builder-field-designer', CB_BLOCK_BUILDER_URL . 'js/field-designer.js', array(), CB_BLOCK_BUILDER_VERSION, true );
+
+	$editing = cb_block_builder_get_editing_block();
+
 	wp_localize_script(
 		'cb-block-builder-field-designer',
 		'lcBlockBuilder',
 		array(
 			'existingSlugs' => cb_block_builder_get_existing_slugs(),
+			'editing'       => $editing ? array(
+				'slug'   => $editing['slug'],
+				'fields' => $editing['fields'],
+			) : null,
 		)
 	);
 }
 add_action( 'admin_enqueue_scripts', 'cb_block_builder_enqueue_assets' );
+
+/**
+ * Look up the block named by `?edit={slug}`, if any, and load its
+ * `.block-builder.json` sidecar — the data needed to re-open it in the
+ * Design New panel for an attributes-only edit. Returns null for a missing
+ * slug, a slug with no matching block, or a block with no sidecar (created
+ * before edit support existed, or not created by this plugin at all).
+ *
+ * @return array{slug: string, title: string, color_support: bool, fields: array}|null
+ */
+function cb_block_builder_get_editing_block() {
+	if ( empty( $_GET['edit'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only lookup, not a state change.
+		return null;
+	}
+
+	$slug = sanitize_key( wp_unslash( $_GET['edit'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only lookup, not a state change.
+
+	if ( '' === $slug ) {
+		return null;
+	}
+
+	$theme_context = cb_block_builder_get_theme_context();
+	$block_dir     = trailingslashit( $theme_context['blocks_dir'] ) . $slug;
+	$config        = cb_block_builder_read_sidecar_config( $block_dir );
+
+	if ( null === $config ) {
+		return null;
+	}
+
+	$config['slug'] = $slug;
+
+	return $config;
+}
 
 /**
  * Read every existing block's title/slug/attribute count from the active
@@ -73,10 +113,13 @@ function cb_block_builder_get_existing_blocks() {
 			continue;
 		}
 
+		$block_dir = dirname( $block_json_path );
+
 		$blocks[] = array(
-			'title'      => $data['title'] ?? basename( dirname( $block_json_path ) ),
-			'slug'       => basename( dirname( $block_json_path ) ),
+			'title'      => $data['title'] ?? basename( $block_dir ),
+			'slug'       => basename( $block_dir ),
 			'attr_count' => isset( $data['attributes'] ) && is_array( $data['attributes'] ) ? count( $data['attributes'] ) : 0,
+			'editable'   => null !== cb_block_builder_read_sidecar_config( $block_dir ),
 		);
 	}
 
@@ -130,6 +173,7 @@ function cb_block_builder_field_type_labels() {
 		'link'     => __( 'Link', 'cb-block-builder' ),
 		'number'   => __( 'Number', 'cb-block-builder' ),
 		'select'   => __( 'Select', 'cb-block-builder' ),
+		'radio'    => __( 'Radio', 'cb-block-builder' ),
 		'checkbox' => __( 'Checkbox', 'cb-block-builder' ),
 		'repeater'  => __( 'Repeater', 'cb-block-builder' ),
 		'post_type' => __( 'Post Type (single post picker)', 'cb-block-builder' ),
@@ -173,6 +217,7 @@ function cb_block_builder_subfield_type_labels() {
 		'image'    => __( 'Image', 'cb-block-builder' ),
 		'file'     => __( 'File', 'cb-block-builder' ),
 		'link'     => __( 'Link', 'cb-block-builder' ),
+		'radio'    => __( 'Radio', 'cb-block-builder' ),
 	);
 }
 
@@ -182,29 +227,45 @@ function cb_block_builder_subfield_type_labels() {
  * @param bool $active Whether this panel should start visible.
  * @return void
  */
-function cb_block_builder_render_design_new_panel( $active ) {
+function cb_block_builder_render_design_new_panel( $active, $editing = null ) {
 	$field_types      = cb_block_builder_field_type_labels();
 	$subfield_types   = cb_block_builder_subfield_type_labels();
 	$post_type_choices = cb_block_builder_post_type_choices();
 	?>
 	<div class="cb-block-builder-tabs__panel" data-tabs-panel="design-new" <?php echo $active ? '' : 'hidden'; ?>>
+		<?php if ( $editing ) : ?>
+			<div class="notice notice-info inline">
+				<p>
+					<?php
+					printf(
+						/* translators: %s: block title. */
+						esc_html__( 'Editing "%s" — saving regenerates block.json and src/edit.js from these fields (any hand edits to src/edit.js will be overwritten). render.php isn\'t touched — check it still matches afterward.', 'cb-block-builder' ),
+						esc_html( $editing['title'] )
+					);
+					?>
+				</p>
+			</div>
+		<?php endif; ?>
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" id="cb-block-builder-form">
 			<?php wp_nonce_field( 'cb_block_builder_generate' ); ?>
 			<input type="hidden" name="action" value="cb_block_builder_generate">
 			<input type="hidden" name="fields_json" id="cb-block-builder-fields-json" value="[]">
+			<?php if ( $editing ) : ?>
+				<input type="hidden" name="editing_slug" value="<?php echo esc_attr( $editing['slug'] ); ?>">
+			<?php endif; ?>
 
 			<div class="cb-block-builder-field-row">
 				<label for="cb-block-builder-title"><?php esc_html_e( 'Block title', 'cb-block-builder' ); ?></label>
-				<input type="text" id="cb-block-builder-title" name="title" class="regular-text" required>
+				<input type="text" id="cb-block-builder-title" name="title" class="regular-text" value="<?php echo $editing ? esc_attr( $editing['title'] ) : ''; ?>" <?php echo $editing ? 'readonly' : ''; ?> required>
 				<p class="description">
-					<?php esc_html_e( 'Will be created at:', 'cb-block-builder' ); ?>
-					<code>blocks/<span id="cb-block-builder-slug-preview">&hellip;</span>/</code>
+					<?php echo $editing ? esc_html__( 'Existing block at:', 'cb-block-builder' ) : esc_html__( 'Will be created at:', 'cb-block-builder' ); ?>
+					<code>blocks/<span id="cb-block-builder-slug-preview"><?php echo $editing ? esc_html( $editing['slug'] ) : '&hellip;'; ?></span>/</code>
 				</p>
 			</div>
 
 			<div class="cb-block-builder-field-row">
 				<label>
-					<input type="checkbox" name="color_support" value="1">
+					<input type="checkbox" name="color_support" value="1" <?php checked( ! empty( $editing['color_support'] ) ); ?>>
 					<?php esc_html_e( 'This block supports background/text colour (Gutenberg colour panel)', 'cb-block-builder' ); ?>
 				</label>
 			</div>
@@ -215,7 +276,7 @@ function cb_block_builder_render_design_new_panel( $active ) {
 				<button type="button" class="button button-secondary" id="cb-block-builder-add-row"><?php esc_html_e( 'Add field', 'cb-block-builder' ); ?></button>
 			</p>
 
-			<?php submit_button( __( 'Create Block', 'cb-block-builder' ) ); ?>
+			<?php submit_button( $editing ? __( 'Update Attributes', 'cb-block-builder' ) : __( 'Create Block', 'cb-block-builder' ) ); ?>
 		</form>
 
 		<template id="cb-block-builder-row-template">
@@ -249,11 +310,12 @@ function cb_block_builder_render_design_new_panel( $active ) {
 							</select>
 						</label>
 					</div>
-					<div class="cb-block-builder-row__conditional" data-for="select">
+					<div class="cb-block-builder-row__conditional" data-for="select radio">
 						<label>
 							<?php esc_html_e( 'Options (comma-separated)', 'cb-block-builder' ); ?>
 							<input type="text" class="cb-block-builder-field-options" value="">
 						</label>
+						<p class="description"><?php esc_html_e( 'Wrap one option in [brackets] to make it the default; otherwise the first option is used.', 'cb-block-builder' ); ?></p>
 					</div>
 					<div class="cb-block-builder-row__conditional" data-for="textarea">
 						<label>
@@ -317,6 +379,7 @@ function cb_block_builder_render_design_new_panel( $active ) {
 					<input type="checkbox" class="cb-block-builder-subfield-link-target-input">
 					<?php esc_html_e( 'New tab toggle', 'cb-block-builder' ); ?>
 				</label>
+				<input type="text" class="cb-block-builder-subfield-options" placeholder="<?php esc_attr_e( 'Options, comma-separated — [bracket] one for the default', 'cb-block-builder' ); ?>" hidden>
 				<button type="button" class="button cb-block-builder-remove-subfield" title="<?php esc_attr_e( 'Remove', 'cb-block-builder' ); ?>">&times;</button>
 			</div>
 		</template>
@@ -383,6 +446,7 @@ function cb_block_builder_render_blocks_panel( $active ) {
 						<th><?php esc_html_e( 'Title', 'cb-block-builder' ); ?></th>
 						<th><?php esc_html_e( 'Slug', 'cb-block-builder' ); ?></th>
 						<th><?php esc_html_e( 'Fields', 'cb-block-builder' ); ?></th>
+						<th></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -391,6 +455,13 @@ function cb_block_builder_render_blocks_panel( $active ) {
 							<td><?php echo esc_html( $block['title'] ); ?></td>
 							<td><code><?php echo esc_html( $block['slug'] ); ?></code></td>
 							<td><?php echo esc_html( $block['attr_count'] ); ?></td>
+							<td>
+								<?php if ( $block['editable'] ) : ?>
+									<a class="button button-small" href="<?php echo esc_url( add_query_arg( array( 'page' => 'cb-block-builder', 'edit' => $block['slug'] ), admin_url( 'admin.php' ) ) ); ?>">
+										<?php esc_html_e( 'Edit fields', 'cb-block-builder' ); ?>
+									</a>
+								<?php endif; ?>
+							</td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>
@@ -425,7 +496,7 @@ function cb_block_builder_render_page() {
 				</h2>
 
 				<?php
-				cb_block_builder_render_design_new_panel( true );
+				cb_block_builder_render_design_new_panel( true, cb_block_builder_get_editing_block() );
 				cb_block_builder_render_blocks_panel( false );
 				?>
 			</div>

@@ -49,7 +49,8 @@
 		function updateConditionalVisibility( row ) {
 			var type = row.querySelector( '.cb-block-builder-field-type' ).value;
 			row.querySelectorAll( '.cb-block-builder-row__conditional' ).forEach( function ( conditional ) {
-				conditional.hidden = conditional.getAttribute( 'data-for' ) !== type;
+				var dataFor = conditional.getAttribute( 'data-for' ).split( ' ' );
+				conditional.hidden = dataFor.indexOf( type ) === -1;
 			} );
 		}
 
@@ -57,6 +58,7 @@
 			var type = subfieldRow.querySelector( '.cb-block-builder-subfield-type' ).value;
 			subfieldRow.querySelector( '.cb-block-builder-subfield-mime' ).hidden = 'file' !== type;
 			subfieldRow.querySelector( '.cb-block-builder-subfield-link-target' ).hidden = 'link' !== type;
+			subfieldRow.querySelector( '.cb-block-builder-subfield-options' ).hidden = 'radio' !== type;
 		}
 
 		function bindSubfieldRow( subfieldRow ) {
@@ -120,9 +122,50 @@
 			rowsWrap.appendChild( row );
 			bindRow( row );
 			renumberRows();
+			return row;
+		}
+
+		// Re-hydrate a freshly-added row/sub-field row from a previously
+		// saved field (from the .block-builder.json sidecar, passed down
+		// via lcBlockBuilder.editing) — the reverse of the submit
+		// handler's DOM-to-JSON read below.
+		function populateRow( row, field ) {
+			row.querySelector( '.cb-block-builder-field-label' ).value = field.label || '';
+			row.querySelector( '.cb-block-builder-field-type' ).value = field.type || 'text';
+			row.querySelector( '.cb-block-builder-field-help' ).value = field.help || '';
+			row.querySelector( '.cb-block-builder-field-width' ).value = String( field.width || 100 );
+			row.querySelector( '.cb-block-builder-field-options' ).value = field.options || '';
+			row.querySelector( '.cb-block-builder-field-textarea-style' ).value = field.textarea_style || 'paragraph';
+			row.querySelector( '.cb-block-builder-field-link-target' ).checked = !! field.link_target;
+			row.querySelector( '.cb-block-builder-field-post-type-slug' ).value = field.post_type_slug || '';
+
+			if ( 'repeater' === field.type ) {
+				row.querySelector( '.cb-block-builder-field-repeater-layout' ).value = field.repeater_layout || 'row';
+
+				var subfieldsWrap = row.querySelector( '.cb-block-builder-subfields' );
+				( field.sub_fields || [] ).forEach( function ( subField ) {
+					addSubfieldRow( subfieldsWrap );
+					var subRow = subfieldsWrap.lastElementChild;
+					subRow.querySelector( '.cb-block-builder-subfield-label' ).value = subField.label || '';
+					subRow.querySelector( '.cb-block-builder-subfield-type' ).value = subField.type || 'text';
+					subRow.querySelector( '.cb-block-builder-subfield-mime' ).value = subField.mime_types || '';
+					subRow.querySelector( '.cb-block-builder-subfield-link-target-input' ).checked = !! subField.link_target;
+					subRow.querySelector( '.cb-block-builder-subfield-options' ).value = subField.options || '';
+					updateSubfieldConditionalVisibility( subRow );
+				} );
+			}
+
+			updateConditionalVisibility( row );
 		}
 
 		addRowButton.addEventListener( 'click', addRow );
+
+		var editing = window.lcBlockBuilder && window.lcBlockBuilder.editing;
+		if ( editing && editing.fields ) {
+			editing.fields.forEach( function ( field ) {
+				populateRow( addRow(), field );
+			} );
+		}
 
 		if ( titleInput && slugPreview ) {
 			titleInput.addEventListener( 'input', function () {
@@ -174,6 +217,7 @@
 							type: subfieldRow.querySelector( '.cb-block-builder-subfield-type' ).value,
 							mime_types: subfieldRow.querySelector( '.cb-block-builder-subfield-mime' ).value.trim(),
 							link_target: subfieldRow.querySelector( '.cb-block-builder-subfield-link-target-input' ).checked,
+							options: subfieldRow.querySelector( '.cb-block-builder-subfield-options' ).value.trim(),
 						} );
 					} );
 

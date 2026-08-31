@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CBP Block Builder
  * Description: A GUI block scaffolder for cb-js-skeleton2026-shaped native-block themes (block.json/edit.js/render.php). Local-development only — inert on any environment that isn't detected as local.
- * Version: 1.0.0
+ * Version: 1.2.0
  * Author: Chillibyte - DS
  * Text Domain: cb-block-builder
  *
@@ -18,7 +18,7 @@ defined( 'ABSPATH' ) || exit;
 define( 'CB_BLOCK_BUILDER_FILE', __FILE__ );
 define( 'CB_BLOCK_BUILDER_DIR', plugin_dir_path( __FILE__ ) );
 define( 'CB_BLOCK_BUILDER_URL', plugin_dir_url( __FILE__ ) );
-define( 'CB_BLOCK_BUILDER_VERSION', '1.0.0' );
+define( 'CB_BLOCK_BUILDER_VERSION', '1.2.0' );
 
 require_once CB_BLOCK_BUILDER_DIR . 'inc/environment.php';
 
