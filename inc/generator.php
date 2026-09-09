@@ -40,6 +40,101 @@ function cb_block_builder_supported_subfield_types() {
 }
 
 /**
+ * Field types a conditional-logic rule can target — only types with a
+ * comparable scalar value. Types like `richtext`/`image`/`gallery`/`link`/
+ * `repeater`/`post_type` are excluded from the "Field" dropdown in the
+ * conditional-logic UI; comparing against them isn't well-defined without
+ * ACF's per-type condition classes, which is out of scope here.
+ *
+ * @var string[]
+ */
+function cb_block_builder_conditional_target_types() {
+	return array( 'text', 'textarea', 'number', 'url', 'select', 'radio', 'checkbox' );
+}
+
+/**
+ * Operators offered by the conditional-logic UI, keyed by the value stored
+ * in a rule's `operator`. Deliberately a subset of ACF's own vocabulary,
+ * scoped to what cb_block_builder_build_condition_expression() knows how to
+ * translate into a JS boolean expression.
+ *
+ * @return array<string, string>
+ */
+function cb_block_builder_conditional_operators() {
+	return array(
+		'=='         => __( 'is equal to', 'cb-block-builder' ),
+		'!='         => __( 'is not equal to', 'cb-block-builder' ),
+		'>'          => __( 'is greater than', 'cb-block-builder' ),
+		'<'          => __( 'is less than', 'cb-block-builder' ),
+		'==contains' => __( 'contains', 'cb-block-builder' ),
+		'!=contains' => __( 'does not contain', 'cb-block-builder' ),
+		'==empty'    => __( 'has no value', 'cb-block-builder' ),
+		'!=empty'    => __( 'has any value', 'cb-block-builder' ),
+	);
+}
+
+/**
+ * Generate a stable, random identifier for a field — assigned once when a
+ * row is first created (client-side) and kept for the field's lifetime so
+ * conditional-logic rules can reference it independently of the field's
+ * label or position, the same field-key-vs-name split ACF uses.
+ *
+ * @return string
+ */
+function cb_block_builder_generate_field_key() {
+	return 'field_' . strtolower( wp_generate_password( 10, false ) );
+}
+
+/**
+ * Sanitize a submitted `conditional_logic` value into the OR-groups-of-
+ * AND-rules shape the rest of this file expects, dropping anything
+ * malformed: rules with no field or an unrecognised operator, and any
+ * group left with zero rules once those are dropped (mirrors ACF's own
+ * save-time cleanup of its conditional_logic array).
+ *
+ * @param mixed $raw Raw submitted conditional_logic value.
+ * @return array<int, array<int, array{field: string, operator: string, value: string}>>
+ */
+function cb_block_builder_sanitize_conditional_logic( $raw ) {
+	if ( ! is_array( $raw ) ) {
+		return array();
+	}
+
+	$operators = array_keys( cb_block_builder_conditional_operators() );
+	$groups    = array();
+
+	foreach ( $raw as $raw_group ) {
+		if ( ! is_array( $raw_group ) ) {
+			continue;
+		}
+
+		$rules = array();
+		foreach ( $raw_group as $raw_rule ) {
+			if ( ! is_array( $raw_rule ) || empty( $raw_rule['field'] ) ) {
+				continue;
+			}
+
+			$operator = isset( $raw_rule['operator'] ) ? (string) $raw_rule['operator'] : '==';
+			if ( ! in_array( $operator, $operators, true ) ) {
+				continue;
+			}
+
+			$rules[] = array(
+				'field'    => sanitize_key( $raw_rule['field'] ),
+				'operator' => $operator,
+				'value'    => isset( $raw_rule['value'] ) ? sanitize_text_field( (string) $raw_rule['value'] ) : '',
+			);
+		}
+
+		if ( $rules ) {
+			$groups[] = $rules;
+		}
+	}
+
+	return $groups;
+}
+
+/**
  * Parse a comma-separated `select`/`radio` options string into an ordered
  * options list plus a default value. Every option becomes a
  * `{ label, value }` pair (the same string for both), in the order given.
@@ -340,6 +435,8 @@ function cb_block_builder_normalise_field( $field ) {
 		'sub_fields'     => array(),
 		'repeater_layout' => isset( $field['repeater_layout'] ) ? sanitize_key( $field['repeater_layout'] ) : 'row',
 		'post_type_slug' => isset( $field['post_type_slug'] ) ? sanitize_key( $field['post_type_slug'] ) : '',
+		'field_key'         => ! empty( $field['field_key'] ) ? sanitize_key( $field['field_key'] ) : cb_block_builder_generate_field_key(),
+		'conditional_logic' => cb_block_builder_sanitize_conditional_logic( $field['conditional_logic'] ?? array() ),
 	);
 
 	if ( 'repeater' === $normalised['type'] && ! empty( $field['sub_fields'] ) && is_array( $field['sub_fields'] ) ) {
@@ -677,6 +774,125 @@ function cb_block_builder_build_field_jsx( $field, $editor_prefix, $text_domain 
 }
 
 /**
+ * Map every field's `field_key` to its JS attribute name, for translating
+ * stored conditional-logic rules (which reference a field_key) into the
+ * plain destructured identifiers available inside the generated `Edit()`
+ * function body. Only top-level fields participate — repeater sub-fields
+ * are out of scope for conditional logic.
+ *
+ * @param array $fields Normalised fields.
+ * @return array<string, string>
+ */
+function cb_block_builder_build_field_key_map( $fields ) {
+	$map = array();
+	foreach ( $fields as $field ) {
+		if ( ! empty( $field['field_key'] ) ) {
+			$map[ $field['field_key'] ] = $field['name'];
+		}
+	}
+	return $map;
+}
+
+/**
+ * Turn a field's `conditional_logic` (OR-groups of AND-rules) into a single
+ * JS boolean expression, e.g. `( variant === 'article' ) || ( variant ===
+ * 'campaign' )`, for wrapping that field's JSX in `{ <expr> && ( ... ) }`.
+ * A rule referencing a `field_key` no longer present in `$key_map` (the
+ * target field was deleted/renamed) is silently dropped rather than
+ * breaking generation — same leniency the admin UI applies when rebuilding
+ * its own dropdowns.
+ *
+ * @param array                $conditional_logic Sanitized conditional_logic array.
+ * @param array<string,string> $key_map           field_key => JS attribute name.
+ * @param array<string,array>  $fields_by_key      field_key => normalised field, for type-aware operators.
+ * @return string Empty string if there's nothing left to evaluate.
+ */
+function cb_block_builder_build_condition_expression( $conditional_logic, $key_map, $fields_by_key = array() ) {
+	if ( empty( $conditional_logic ) ) {
+		return '';
+	}
+
+	$group_expressions = array();
+
+	foreach ( $conditional_logic as $group ) {
+		$rule_expressions = array();
+
+		foreach ( $group as $rule ) {
+			if ( empty( $rule['field'] ) || ! isset( $key_map[ $rule['field'] ] ) ) {
+				continue;
+			}
+
+			$var          = $key_map[ $rule['field'] ];
+			$value        = cb_block_builder_js_str( $rule['value'] );
+			$target_field = $fields_by_key[ $rule['field'] ] ?? null;
+			$is_numeric   = $target_field && 'number' === $target_field['type'];
+			$is_checkbox  = $target_field && 'checkbox' === $target_field['type'];
+			$checked      = in_array( strtolower( (string) $rule['value'] ), array( '1', 'true' ), true );
+
+			switch ( $rule['operator'] ) {
+				case '==':
+					if ( $is_checkbox ) {
+						$rule_expressions[] = $checked ? "{$var} === true" : "{$var} === false";
+					} elseif ( $is_numeric ) {
+						$rule_expressions[] = "Number( {$var} ) === Number( '{$value}' )";
+					} else {
+						$rule_expressions[] = "{$var} === '{$value}'";
+					}
+					break;
+
+				case '!=':
+					if ( $is_checkbox ) {
+						$rule_expressions[] = $checked ? "{$var} !== true" : "{$var} !== false";
+					} elseif ( $is_numeric ) {
+						$rule_expressions[] = "Number( {$var} ) !== Number( '{$value}' )";
+					} else {
+						$rule_expressions[] = "{$var} !== '{$value}'";
+					}
+					break;
+
+				case '>':
+					$rule_expressions[] = "Number( {$var} ) > Number( '{$value}' )";
+					break;
+
+				case '<':
+					$rule_expressions[] = "Number( {$var} ) < Number( '{$value}' )";
+					break;
+
+				case '==contains':
+					$rule_expressions[] = "String( {$var} ).includes( '{$value}' )";
+					break;
+
+				case '!=contains':
+					$rule_expressions[] = "! String( {$var} ).includes( '{$value}' )";
+					break;
+
+				case '==empty':
+					$rule_expressions[] = "! {$var}";
+					break;
+
+				case '!=empty':
+					$rule_expressions[] = "!! {$var}";
+					break;
+			}
+		}
+
+		if ( $rule_expressions ) {
+			$group_expressions[] = count( $rule_expressions ) > 1
+				? '( ' . implode( ' && ', $rule_expressions ) . ' )'
+				: $rule_expressions[0];
+		}
+	}
+
+	if ( ! $group_expressions ) {
+		return '';
+	}
+
+	return count( $group_expressions ) > 1
+		? '( ' . implode( ' || ', $group_expressions ) . ' )'
+		: $group_expressions[0];
+}
+
+/**
  * Build the module-level `{name}Fields` / `{name}EmptyRow` consts a
  * repeater field's JSX references — placed above `export default function
  * Edit` in the generated file, same position as the active theme's own
@@ -913,9 +1129,24 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 		}
 	}
 
+	$field_key_map = cb_block_builder_build_field_key_map( $fields );
+	$fields_by_key = array();
+	foreach ( $fields as $field ) {
+		if ( ! empty( $field['field_key'] ) ) {
+			$fields_by_key[ $field['field_key'] ] = $field;
+		}
+	}
+
 	$field_html = array();
 	foreach ( $fields as $field ) {
-		$field_html[] = cb_block_builder_build_field_jsx( $field, $editor_prefix, $text_domain );
+		$html = cb_block_builder_build_field_jsx( $field, $editor_prefix, $text_domain );
+
+		$condition_expr = cb_block_builder_build_condition_expression( $field['conditional_logic'] ?? array(), $field_key_map, $fields_by_key );
+		if ( '' !== $condition_expr ) {
+			$html = "\t\t\t{ {$condition_expr} && (\n{$html}\t\t\t) }\n";
+		}
+
+		$field_html[] = $html;
 	}
 
 	// Group consecutive non-100%-width fields into flex rows — same

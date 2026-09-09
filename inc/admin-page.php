@@ -52,8 +52,14 @@ function cb_block_builder_enqueue_assets( $hook_suffix ) {
 		'cb-block-builder-field-designer',
 		'lcBlockBuilder',
 		array(
-			'existingSlugs' => cb_block_builder_get_existing_slugs(),
-			'editing'       => $editing ? array(
+			'existingSlugs'         => cb_block_builder_get_existing_slugs(),
+			'conditionOperators'    => cb_block_builder_conditional_operators(),
+			'conditionTargetTypes'  => cb_block_builder_conditional_target_types(),
+			'conditionLabels'       => array(
+				'showIf' => __( 'Show this field if', 'cb-block-builder' ),
+				'or'     => __( 'or', 'cb-block-builder' ),
+			),
+			'editing'               => $editing ? array(
 				'slug'   => $editing['slug'],
 				'fields' => $editing['fields'],
 			) : null,
@@ -357,6 +363,17 @@ function cb_block_builder_render_design_new_panel( $active, $editing = null ) {
 						<div class="cb-block-builder-subfields"></div>
 						<button type="button" class="button cb-block-builder-add-subfield"><?php esc_html_e( 'Add sub-field', 'cb-block-builder' ); ?></button>
 					</div>
+					<div class="cb-block-builder-row__conditions">
+						<label>
+							<input type="checkbox" class="cb-block-builder-conditions-toggle">
+							<?php esc_html_e( 'Conditional logic', 'cb-block-builder' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Only show this field in the block editor when the rules below are met. Other top-level fields can be referenced; repeater sub-fields cannot.', 'cb-block-builder' ); ?></p>
+						<div class="cb-block-builder-conditions" hidden>
+							<div class="cb-block-builder-condition-groups"></div>
+							<button type="button" class="button cb-block-builder-add-condition-group"><?php esc_html_e( 'Add rule group ("or")', 'cb-block-builder' ); ?></button>
+						</div>
+					</div>
 				</div>
 				<div class="cb-block-builder-row__actions">
 					<button type="button" class="button cb-block-builder-move-up" title="<?php esc_attr_e( 'Move up', 'cb-block-builder' ); ?>">&#9650;</button>
@@ -381,6 +398,26 @@ function cb_block_builder_render_design_new_panel( $active, $editing = null ) {
 				</label>
 				<input type="text" class="cb-block-builder-subfield-options" placeholder="<?php esc_attr_e( 'Options, comma-separated — [bracket] one for the default', 'cb-block-builder' ); ?>" hidden>
 				<button type="button" class="button cb-block-builder-remove-subfield" title="<?php esc_attr_e( 'Remove', 'cb-block-builder' ); ?>">&times;</button>
+			</div>
+		</template>
+
+		<template id="cb-block-builder-condition-group-template">
+			<div class="cb-block-builder-condition-group">
+				<h4 class="cb-block-builder-condition-group__heading"></h4>
+				<div class="cb-block-builder-condition-rules"></div>
+				<button type="button" class="button-link cb-block-builder-add-condition-rule"><?php esc_html_e( 'and', 'cb-block-builder' ); ?></button>
+				<button type="button" class="button-link cb-block-builder-remove-condition-group"><?php esc_html_e( 'Remove group', 'cb-block-builder' ); ?></button>
+			</div>
+		</template>
+
+		<template id="cb-block-builder-condition-rule-template">
+			<div class="cb-block-builder-condition-rule">
+				<select class="cb-block-builder-condition-field"></select>
+				<select class="cb-block-builder-condition-operator"></select>
+				<span class="cb-block-builder-condition-value-wrap">
+					<input type="text" class="cb-block-builder-condition-value">
+				</span>
+				<button type="button" class="button cb-block-builder-remove-condition-rule" title="<?php esc_attr_e( 'Remove', 'cb-block-builder' ); ?>">&times;</button>
 			</div>
 		</template>
 	</div>

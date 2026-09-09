@@ -67,14 +67,16 @@ function cb_block_builder_handle_generate() {
 		}
 
 		$sanitized_field = array(
-			'label'          => isset( $field['label'] ) ? (string) $field['label'] : '',
-			'type'           => isset( $field['type'] ) ? (string) $field['type'] : '',
-			'help'           => isset( $field['help'] ) ? (string) $field['help'] : '',
-			'width'          => isset( $field['width'] ) ? (int) $field['width'] : 100,
-			'options'        => isset( $field['options'] ) ? (string) $field['options'] : '',
-			'textarea_style' => isset( $field['textarea_style'] ) ? (string) $field['textarea_style'] : 'paragraph',
-			'link_target'    => ! empty( $field['link_target'] ),
-			'sub_fields'     => array(),
+			'label'             => isset( $field['label'] ) ? (string) $field['label'] : '',
+			'type'              => isset( $field['type'] ) ? (string) $field['type'] : '',
+			'help'              => isset( $field['help'] ) ? (string) $field['help'] : '',
+			'width'             => isset( $field['width'] ) ? (int) $field['width'] : 100,
+			'options'           => isset( $field['options'] ) ? (string) $field['options'] : '',
+			'textarea_style'    => isset( $field['textarea_style'] ) ? (string) $field['textarea_style'] : 'paragraph',
+			'link_target'       => ! empty( $field['link_target'] ),
+			'field_key'         => isset( $field['field_key'] ) ? sanitize_key( $field['field_key'] ) : '',
+			'conditional_logic' => cb_block_builder_sanitize_conditional_logic( $field['conditional_logic'] ?? array() ),
+			'sub_fields'        => array(),
 		);
 
 		if ( ! empty( $field['sub_fields'] ) && is_array( $field['sub_fields'] ) ) {

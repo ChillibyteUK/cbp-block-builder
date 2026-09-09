@@ -181,3 +181,63 @@
 .cb-block-builder-subfield-row input[hidden] {
 	display: none;
 }
+
+.cb-block-builder-row__conditions {
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid #e0e0e0;
+}
+
+.cb-block-builder-row__conditions > label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	font-weight: 600;
+	color: #1d2327;
+}
+
+.cb-block-builder-row__conditions .description {
+	margin: 4px 0 8px;
+}
+
+.cb-block-builder-conditions[hidden] {
+	display: none;
+}
+
+.cb-block-builder-condition-group {
+	background: #fff;
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+	padding: 10px;
+	margin-bottom: 8px;
+}
+
+.cb-block-builder-condition-group__heading {
+	margin: 0 0 8px;
+	font-size: 12px;
+	text-transform: uppercase;
+	color: #50575e;
+}
+
+.cb-block-builder-condition-rule {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
+.cb-block-builder-condition-rule select,
+.cb-block-builder-condition-rule input[type="text"] {
+	flex: 1 1 0%;
+}
+
+.cb-block-builder-condition-value-wrap {
+	flex: 1 1 0%;
+	display: block;
+}
+
+.cb-block-builder-condition-value-wrap select,
+.cb-block-builder-condition-value-wrap input {
+	width: 100%;
+}
