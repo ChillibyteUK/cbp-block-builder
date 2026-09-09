@@ -76,6 +76,7 @@ function cb_block_builder_handle_generate() {
 			'link_target'       => ! empty( $field['link_target'] ),
 			'field_key'         => isset( $field['field_key'] ) ? sanitize_key( $field['field_key'] ) : '',
 			'conditional_logic' => cb_block_builder_sanitize_conditional_logic( $field['conditional_logic'] ?? array() ),
+			'allowed_extensions' => cb_block_builder_sanitize_extensions_list( $field['allowed_extensions'] ?? '' ),
 			'sub_fields'        => array(),
 		);
 

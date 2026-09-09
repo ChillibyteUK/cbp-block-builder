@@ -102,6 +102,7 @@ warning rather than hiding the page outright.
 | Select              | Comma-separated options. Wrap one in `[brackets]` to make it the default; otherwise the first option is used.                                                                                                                                                                                                                                                                                                               |
 | Radio               | Same comma-separated/`[bracket]`-default options as Select, rendered as `RadioControl`. Also available as a repeater sub-field type — needs `blocks/_shared/RepeaterField.js`'s matching `radio` branch.                                                                                                                                                                                                                    |
 | Checkbox            | Boolean toggle                                                                                                                                                                                                                                                                                                                                                                                                              |
+| File                | Single non-image file, `MediaUpload`. Optional "Allowed file types" setting — a comma-separated extension list (e.g. `pdf, doc, docx`), same convention as ACF's file field; resolved to WordPress's own MIME-type registry to filter the media picker. Leave blank to allow any file type. Stores `{name}Id`/`{name}Name`/`{name}Url`.                                                                                |
 | Repeater            | Repeating rows of sub-fields (text / number / textarea / image / file / link / radio — file fields take a comma-separated MIME-type allow-list, link fields get their own "open in new tab" toggle, radio fields get the same options/default syntax as the top-level Select/Radio types). Rows can lay out as a row (default) or a column.                                                                                 |
 | Post Type           | Single post picker (search-as-you-type `ComboboxControl`, backed by `@wordpress/core-data`) — the block-editor equivalent of ACF's single `post_object` field. Pick which registered post type it searches (e.g. `product`) from a dropdown of post types actually registered on this site. Stores one post ID (`{name}Id`, `type: number`); render.php gets a generic `get_post()` + linked-title skeleton to hand-finish. |
 
@@ -127,8 +128,23 @@ trade-off: **any hand edits previously made to `src/edit.js` are
 overwritten**. `render.php` is never touched by an edit — the on-screen
 notice reminds you to check it still matches whatever field changes you
 just made. Blocks with no sidecar (hand-written, or created before this
-existed) have no **Edit fields** link — they stay exactly as read-only as
-before.
+existed) show a **Custom** badge instead of an **Edit fields** link on the
+**Blocks** tab — they stay exactly as read-only as before, but the badge
+makes clear that's deliberate rather than a missing button.
+
+## Conditional logic
+
+Any field can be shown only when other top-level fields on the same block
+meet a rule, matching ACF's own "Conditional Logic" model: OR-groups of
+AND-rules (e.g. "show if Layout == Advanced, or if Featured has any
+value"). Toggle **Conditional logic** on a field row to configure it. Only
+scalar-valued field types (Text, Textarea, Number, URL, Select, Radio,
+Checkbox) can be the *target* of a rule — Image/Gallery/Link/Repeater/File/
+Post Type fields can't be compared against, though any field type
+(including those) can itself be conditionally shown. Repeater sub-fields
+can't participate on either side. The rules only affect the block editor's
+canvas (`src/edit.js`) — a hidden field's value still saves and still
+renders on the front end, same as ACF's own behaviour.
 
 ## What this plugin does not do
 

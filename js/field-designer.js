@@ -431,6 +431,7 @@
 			row.querySelector( '.cb-block-builder-field-textarea-style' ).value = field.textarea_style || 'paragraph';
 			row.querySelector( '.cb-block-builder-field-link-target' ).checked = !! field.link_target;
 			row.querySelector( '.cb-block-builder-field-post-type-slug' ).value = field.post_type_slug || '';
+			row.querySelector( '.cb-block-builder-field-allowed-extensions' ).value = field.allowed_extensions || '';
 
 			if ( 'repeater' === field.type ) {
 				row.querySelector( '.cb-block-builder-field-repeater-layout' ).value = field.repeater_layout || 'row';
@@ -507,6 +508,7 @@
 					textarea_style: row.querySelector( '.cb-block-builder-field-textarea-style' ).value,
 					link_target: row.querySelector( '.cb-block-builder-field-link-target' ).checked,
 					post_type_slug: row.querySelector( '.cb-block-builder-field-post-type-slug' ).value,
+					allowed_extensions: row.querySelector( '.cb-block-builder-field-allowed-extensions' ).value.trim(),
 					field_key: row.dataset.fieldKey,
 					conditional_logic: readConditionalLogic( row ),
 				};

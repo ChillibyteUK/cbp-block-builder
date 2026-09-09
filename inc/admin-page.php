@@ -181,6 +181,7 @@ function cb_block_builder_field_type_labels() {
 		'select'   => __( 'Select', 'cb-block-builder' ),
 		'radio'    => __( 'Radio', 'cb-block-builder' ),
 		'checkbox' => __( 'Checkbox', 'cb-block-builder' ),
+		'file'     => __( 'File', 'cb-block-builder' ),
 		'repeater'  => __( 'Repeater', 'cb-block-builder' ),
 		'post_type' => __( 'Post Type (single post picker)', 'cb-block-builder' ),
 	);
@@ -338,6 +339,13 @@ function cb_block_builder_render_design_new_panel( $active, $editing = null ) {
 							<input type="checkbox" class="cb-block-builder-field-link-target">
 							<?php esc_html_e( 'Add an "open in new tab" toggle', 'cb-block-builder' ); ?>
 						</label>
+					</div>
+					<div class="cb-block-builder-row__conditional" data-for="file">
+						<label>
+							<?php esc_html_e( 'Allowed file types (extensions, comma-separated)', 'cb-block-builder' ); ?>
+							<input type="text" class="cb-block-builder-field-allowed-extensions" placeholder="pdf, doc, docx">
+						</label>
+						<p class="description"><?php esc_html_e( 'Leave blank to allow any file type. Matched by extension, same convention as ACF\'s file field.', 'cb-block-builder' ); ?></p>
 					</div>
 					<div class="cb-block-builder-row__conditional" data-for="post_type">
 						<label>
@@ -497,6 +505,10 @@ function cb_block_builder_render_blocks_panel( $active ) {
 									<a class="button button-small" href="<?php echo esc_url( add_query_arg( array( 'page' => 'cb-block-builder', 'edit' => $block['slug'] ), admin_url( 'admin.php' ) ) ); ?>">
 										<?php esc_html_e( 'Edit fields', 'cb-block-builder' ); ?>
 									</a>
+								<?php else : ?>
+									<span class="cb-block-builder-custom-badge" title="<?php esc_attr_e( 'This block has no Block Builder sidecar — it was hand-written (or predates edit support) and isn\'t editable here.', 'cb-block-builder' ); ?>">
+										<?php esc_html_e( 'Custom', 'cb-block-builder' ); ?>
+									</span>
 								<?php endif; ?>
 							</td>
 						</tr>

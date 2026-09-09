@@ -26,7 +26,7 @@ defined( 'ABSPATH' ) || exit;
  * @var string[]
  */
 function cb_block_builder_supported_field_types() {
-	return array( 'text', 'textarea', 'richtext', 'image', 'gallery', 'url', 'link', 'number', 'select', 'radio', 'checkbox', 'repeater', 'post_type' );
+	return array( 'text', 'textarea', 'richtext', 'image', 'gallery', 'url', 'link', 'number', 'select', 'radio', 'checkbox', 'file', 'repeater', 'post_type' );
 }
 
 /**
@@ -71,6 +71,90 @@ function cb_block_builder_conditional_operators() {
 		'==empty'    => __( 'has no value', 'cb-block-builder' ),
 		'!=empty'    => __( 'has any value', 'cb-block-builder' ),
 	);
+}
+
+/**
+ * Sanitize a `file` field's "Allowed file types" setting into a clean,
+ * deduplicated comma list of bare extensions (no dots, no whitespace,
+ * lowercase) — e.g. ".PDF, doc , docx" -> "pdf,doc,docx". Mirrors ACF's own
+ * file field setting, which takes the same free-text extension list.
+ *
+ * @param mixed $raw Raw submitted value.
+ * @return string
+ */
+function cb_block_builder_sanitize_extensions_list( $raw ) {
+	$extensions = array();
+
+	foreach ( explode( ',', (string) $raw ) as $extension ) {
+		$extension = strtolower( trim( (string) $extension ) );
+		$extension = preg_replace( '/[^a-z0-9]/', '', $extension );
+		if ( '' !== $extension ) {
+			$extensions[] = $extension;
+		}
+	}
+
+	return implode( ',', array_unique( $extensions ) );
+}
+
+/**
+ * Resolve a bare file extension to its MIME type via WordPress's own
+ * extension => MIME registry (the same list core uses to gate uploads),
+ * rather than maintaining a separate hand-rolled map here.
+ *
+ * @param string $extension Bare extension, e.g. 'pdf'.
+ * @return string MIME type, or '' if unrecognised.
+ */
+function cb_block_builder_extension_to_mime( $extension ) {
+	$extension = strtolower( trim( (string) $extension ) );
+
+	if ( '' === $extension ) {
+		return '';
+	}
+
+	foreach ( wp_get_mime_types() as $extension_pattern => $mime ) {
+		if ( in_array( $extension, explode( '|', $extension_pattern ), true ) ) {
+			return $mime;
+		}
+	}
+
+	return '';
+}
+
+/**
+ * Turn a `file` field's comma-separated allowed-extensions list into a JS
+ * array literal of MIME types for the generated `<MediaUpload
+ * allowedTypes={ ... } />` prop — Gutenberg's media picker filters by MIME,
+ * not by extension, so this is the translation step that lets the admin UI
+ * offer the more familiar ACF-style "pdf, doc, docx" input. An unrecognised
+ * extension is silently skipped (best-effort, same leniency as a dropped
+ * conditional-logic rule) rather than breaking generation; an empty result
+ * means "no restriction", matching ACF's own blank-means-any-file default.
+ *
+ * @param string $extensions_csv Sanitized comma-separated extensions.
+ * @return string JS array literal, e.g. "[ 'application/pdf' ]" or "[]".
+ */
+function cb_block_builder_build_allowed_types_js( $extensions_csv ) {
+	$mimes = array();
+
+	foreach ( explode( ',', (string) $extensions_csv ) as $extension ) {
+		$mime = cb_block_builder_extension_to_mime( $extension );
+		if ( '' !== $mime && ! in_array( $mime, $mimes, true ) ) {
+			$mimes[] = $mime;
+		}
+	}
+
+	if ( ! $mimes ) {
+		return '[]';
+	}
+
+	$quoted = array_map(
+		static function ( $mime ) {
+			return "'" . cb_block_builder_js_str( $mime ) . "'";
+		},
+		$mimes
+	);
+
+	return '[ ' . implode( ', ', $quoted ) . ' ]';
 }
 
 /**
@@ -437,6 +521,7 @@ function cb_block_builder_normalise_field( $field ) {
 		'post_type_slug' => isset( $field['post_type_slug'] ) ? sanitize_key( $field['post_type_slug'] ) : '',
 		'field_key'         => ! empty( $field['field_key'] ) ? sanitize_key( $field['field_key'] ) : cb_block_builder_generate_field_key(),
 		'conditional_logic' => cb_block_builder_sanitize_conditional_logic( $field['conditional_logic'] ?? array() ),
+		'allowed_extensions' => cb_block_builder_sanitize_extensions_list( $field['allowed_extensions'] ?? '' ),
 	);
 
 	if ( 'repeater' === $normalised['type'] && ! empty( $field['sub_fields'] ) && is_array( $field['sub_fields'] ) ) {
@@ -552,6 +637,21 @@ function cb_block_builder_build_attributes_array( $fields ) {
 				$attributes[ $name ] = array(
 					'type'    => 'array',
 					'default' => array(),
+				);
+				break;
+
+			case 'file':
+				$attributes[ $name . 'Id' ]   = array(
+					'type'    => 'number',
+					'default' => 0,
+				);
+				$attributes[ $name . 'Name' ] = array(
+					'type'    => 'string',
+					'default' => '',
+				);
+				$attributes[ $name . 'Url' ]  = array(
+					'type'    => 'string',
+					'default' => '',
 				);
 				break;
 
@@ -768,6 +868,10 @@ function cb_block_builder_build_field_jsx( $field, $editor_prefix, $text_domain 
 		case 'post_type':
 			$post_type_js = cb_block_builder_js_str( $field['post_type_slug'] );
 			return "\t\t\t<PostTypePicker\n\t\t\t\tlabel={ __( '{$label}', '{$domain}' ) }\n\t\t\t\tpostType=\"{$post_type_js}\"\n\t\t\t\tvalue={ {$name}Id }\n\t\t\t\tonChange={ ( id ) => setAttributes( { {$name}Id: id } ) }{$help_attr}\n\t\t\t/>\n";
+
+		case 'file':
+			$allowed_types_js = cb_block_builder_build_allowed_types_js( $field['allowed_extensions'] ?? '' );
+			return "\t\t\t<div className=\"{$editor_prefix}-editor-field\">\n\t\t\t\t<label className=\"{$editor_prefix}-editor-field__label\">{ __( '{$label}', '{$domain}' ) }</label>\n\t\t\t\t<MediaUploadCheck>\n\t\t\t\t\t<MediaUpload\n\t\t\t\t\t\tonSelect={ ( media ) =>\n\t\t\t\t\t\t\tsetAttributes( {\n\t\t\t\t\t\t\t\t{$name}Id: media.id,\n\t\t\t\t\t\t\t\t{$name}Name: media.filename || media.title || '',\n\t\t\t\t\t\t\t\t{$name}Url: media.url,\n\t\t\t\t\t\t\t} )\n\t\t\t\t\t\t}\n\t\t\t\t\t\tallowedTypes={ {$allowed_types_js} }\n\t\t\t\t\t\tvalue={ {$name}Id }\n\t\t\t\t\t\trender={ ( { open } ) => (\n\t\t\t\t\t\t\t<div className=\"{$editor_prefix}-editor-field__control\">\n\t\t\t\t\t\t\t\t{ {$name}Name && <span>{ {$name}Name }</span> }\n\t\t\t\t\t\t\t\t<Button variant=\"secondary\" onClick={ open }>\n\t\t\t\t\t\t\t\t\t{ {$name}Id ? __( 'Replace {$label}', '{$domain}' ) : __( 'Select {$label}', '{$domain}' ) }\n\t\t\t\t\t\t\t\t</Button>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t) }\n\t\t\t\t\t/>\n\t\t\t\t</MediaUploadCheck>{$help_para}\n\t\t\t</div>\n";
 	}
 
 	return '';
@@ -1048,6 +1152,10 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 			case 'post_type':
 				$need['posttypepicker'] = true;
 				break;
+			case 'file':
+				$need['media']  = true;
+				$need['button'] = true;
+				break;
 		}
 	}
 
@@ -1122,6 +1230,11 @@ function cb_block_builder_build_edit_js( $fields, $editor_prefix, $text_domain, 
 				break;
 			case 'post_type':
 				$attr_destructure[] = "{$name}Id";
+				break;
+			case 'file':
+				$attr_destructure[] = "{$name}Id";
+				$attr_destructure[] = "{$name}Name";
+				$attr_destructure[] = "{$name}Url";
 				break;
 			default:
 				$attr_destructure[] = $name;
@@ -1305,6 +1418,12 @@ function cb_block_builder_build_field_render( $field ) {
 			return array(
 				'extract' => "\${$snake}_id = absint( \$attributes['{$name}Id'] ?? 0 );\n\${$snake} = \${$snake}_id ? get_post( \${$snake}_id ) : null;\n",
 				'markup'  => "\t<?php if ( \${$snake} instanceof WP_Post ) { ?>\n\t\t<p><a href=\"<?php echo esc_url( get_permalink( \${$snake}->ID ) ); ?>\"><?php echo esc_html( get_the_title( \${$snake}->ID ) ); ?></a></p>\n\t<?php } ?>\n",
+			);
+
+		case 'file':
+			return array(
+				'extract' => "\${$snake}_name = \$attributes['{$name}Name'] ?? '';\n\${$snake}_url = \$attributes['{$name}Url'] ?? '';\n",
+				'markup'  => "\t<?php if ( \${$snake}_url ) { ?>\n\t\t<a href=\"<?php echo esc_url( \${$snake}_url ); ?>\"><?php echo esc_html( \${$snake}_name ? \${$snake}_name : \${$snake}_url ); ?></a>\n\t<?php } ?>\n",
 			);
 	}
 

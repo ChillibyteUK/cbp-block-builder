@@ -241,3 +241,13 @@
 .cb-block-builder-condition-value-wrap input {
 	width: 100%;
 }
+
+.cb-block-builder-custom-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	background: #f0f0f1;
+	color: #50575e;
+	font-size: 12px;
+	cursor: help;
+}
