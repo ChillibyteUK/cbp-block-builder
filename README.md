@@ -1,11 +1,12 @@
 # CBP Block Builder
 
-A GUI block scaffolder for `cb-js-skeleton2026`-shaped WordPress themes
+A GUI block designer for `cb-js-skeleton2026`-shaped WordPress themes
 (native blocks — `block.json` / `src/edit.js` / `render.php`, no ACF). It's a
 visual replacement for that theme family's `add_block.sh` CLI script: design
-a block's title and fields in `wp-admin`, click **Create Block**, and the
-files land in the active theme's `blocks/` directory ready for `npm run
-blocks:build`.
+a block's title and fields in `wp-admin` — including ACF-style conditional
+logic between fields — click **Create Block**, and the files land in the
+active theme's `blocks/` directory ready for `npm run blocks:build`. A block
+it created can be reopened later and have its fields edited the same way.
 
 Kept as a separate plugin on purpose — the skeleton theme stays one freely
 copyable/forkable asset, and this tool stays a separate one. It never edits
@@ -82,12 +83,19 @@ warning rather than hiding the page outright.
    - Add fields: label, type, optional help text, and a column width
      (100/50/33/25 — consecutive non-100% fields share a row, same as the
      CLI's own layout behaviour).
+   - Optionally toggle **Conditional logic** on a field to only show it in
+     the block editor when other fields meet a rule — see "Conditional
+     logic" below.
 4. Click **Create Block**.
 5. In a terminal, in the theme directory, run `npm run blocks:build` (or
    `npm run blocks:start` while iterating) — the block won't appear
    correctly in the editor until this has run.
 6. Check the **Blocks** tab to see every block already in the theme (title,
-   slug, field count) before you start, so you don't collide with one.
+   slug, field count) before you start, so you don't collide with one. A
+   block previously created (or edited) here shows an **Edit fields** link;
+   a hand-written block, or one that predates this plugin's edit support,
+   shows a **Custom** badge instead — see "Editing an existing block's
+   fields" below.
 
 ## Field types
 
@@ -102,8 +110,8 @@ warning rather than hiding the page outright.
 | Select              | Comma-separated options. Wrap one in `[brackets]` to make it the default; otherwise the first option is used.                                                                                                                                                                                                                                                                                                               |
 | Radio               | Same comma-separated/`[bracket]`-default options as Select, rendered as `RadioControl`. Also available as a repeater sub-field type — needs `blocks/_shared/RepeaterField.js`'s matching `radio` branch.                                                                                                                                                                                                                    |
 | Checkbox            | Boolean toggle                                                                                                                                                                                                                                                                                                                                                                                                              |
-| File                | Single non-image file, `MediaUpload`. Optional "Allowed file types" setting — a comma-separated extension list (e.g. `pdf, doc, docx`), same convention as ACF's file field; resolved to WordPress's own MIME-type registry to filter the media picker. Leave blank to allow any file type. Stores `{name}Id`/`{name}Name`/`{name}Url`.                                                                                |
-| Repeater            | Repeating rows of sub-fields (text / number / textarea / image / file / link / radio — file fields take a comma-separated MIME-type allow-list, link fields get their own "open in new tab" toggle, radio fields get the same options/default syntax as the top-level Select/Radio types). Rows can lay out as a row (default) or a column.                                                                                 |
+| File                | Single non-image file, `MediaUpload`. Optional "Allowed file types" setting — a comma-separated **extension** list (e.g. `pdf, doc, docx`), same convention as ACF's file field; resolved through WordPress's own MIME-type registry (`wp_get_mime_types()`) to filter the media picker. Leave blank to allow any file type. Stores `{name}Id`/`{name}Name`/`{name}Url`.                                                     |
+| Repeater            | Repeating rows of sub-fields (text / number / textarea / image / file / link / radio — link fields get their own "open in new tab" toggle, radio fields get the same options/default syntax as the top-level Select/Radio types). A repeater's own **file** sub-field type takes a comma-separated **MIME-type** allow-list instead (e.g. `application/pdf`) — a different, lower-level convention than the top-level File field's extension list above, inherited as-is from the shared `RepeaterField.js` component. Rows can lay out as a row (default) or a column.                                                                                 |
 | Post Type           | Single post picker (search-as-you-type `ComboboxControl`, backed by `@wordpress/core-data`) — the block-editor equivalent of ACF's single `post_object` field. Pick which registered post type it searches (e.g. `product`) from a dropdown of post types actually registered on this site. Stores one post ID (`{name}Id`, `type: number`); render.php gets a generic `get_post()` + linked-title skeleton to hand-finish. |
 
 Every generated field, including repeater/gallery, mirrors the _structure_
@@ -111,26 +119,6 @@ of how the reference theme's own hand-written blocks do it — this tool
 produces a working skeleton, not necessarily finished design; expect to
 open `render.php`/`src/edit.js` afterward and adjust markup/classes to the
 project's actual design.
-
-## Editing an existing block's fields
-
-Blocks created by this plugin get a `.block-builder.json` sidecar file
-alongside `block.json` — the designer's own field schema (types, sub-fields,
-etc.) that `block.json`'s `attributes` can't fully represent on its own.
-Any block with that sidecar shows an **Edit fields** link on the **Blocks**
-tab, which re-opens it in the **Design New** panel with every field
-pre-filled.
-
-Saving an edit regenerates `block.json`, `src/index.js`, `src/edit.js`,
-and the sidecar from the edited field list — so adding, removing,
-resizing, or reordering fields actually takes effect in the editor. The
-trade-off: **any hand edits previously made to `src/edit.js` are
-overwritten**. `render.php` is never touched by an edit — the on-screen
-notice reminds you to check it still matches whatever field changes you
-just made. Blocks with no sidecar (hand-written, or created before this
-existed) show a **Custom** badge instead of an **Edit fields** link on the
-**Blocks** tab — they stay exactly as read-only as before, but the badge
-makes clear that's deliberate rather than a missing button.
 
 ## Conditional logic
 
@@ -146,6 +134,27 @@ can't participate on either side. The rules only affect the block editor's
 canvas (`src/edit.js`) — a hidden field's value still saves and still
 renders on the front end, same as ACF's own behaviour.
 
+## Editing an existing block's fields
+
+Blocks created by this plugin get a `.block-builder.json` sidecar file
+alongside `block.json` — the designer's own field schema (types,
+sub-fields, conditional logic, etc.) that `block.json`'s `attributes`
+can't fully represent on its own. Any block with that sidecar shows an
+**Edit fields** link on the **Blocks** tab, which re-opens it in the
+**Design New** panel with every field — conditional logic included —
+pre-filled.
+
+Saving an edit regenerates `block.json`, `src/index.js`, `src/edit.js`,
+and the sidecar from the edited field list — so adding, removing,
+resizing, or reordering fields actually takes effect in the editor. The
+trade-off: **any hand edits previously made to `src/edit.js` are
+overwritten**. `render.php` is never touched by an edit — the on-screen
+notice reminds you to check it still matches whatever field changes you
+just made. Blocks with no sidecar (hand-written, or created before this
+existed) show a **Custom** badge instead of an **Edit fields** link on the
+**Blocks** tab — they stay exactly as read-only as before, but the badge
+makes clear that's deliberate rather than a missing button.
+
 ## What this plugin does not do
 
 - It does not run `npm run blocks:build` for you — it only writes files.
@@ -154,9 +163,15 @@ renders on the front end, same as ACF's own behaviour.
   "Editing an existing block's fields" above.
 - It does not support the `relationship` field type (multiple posts,
   e.g. blocks that pull a whole grid from a custom post type via
-  `WP_Query`) — that still needs to be built by hand, same as with the CLI
-  generator. Single-post lookups are covered by the **Post Type** field
-  type above.
+  `WP_Query`), or a user-picker field type — both still need to be built by
+  hand, same as with the CLI generator. Single-post lookups are covered by
+  the **Post Type** field type above.
+- Conditional logic can't target or be placed on a repeater's sub-fields —
+  only top-level fields on the block can reference each other. A block
+  whose hand-written `src/edit.js` filters *which sub-fields* a repeater
+  shows based on another field's value (a different, more involved
+  mechanism than field-level show/hide) has no equivalent here, and stays
+  a **Custom**-badged, hand-maintained block.
 
 ## File layout
 
